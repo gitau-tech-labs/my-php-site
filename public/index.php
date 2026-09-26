@@ -1,6 +1,6 @@
 <?php
 // ============================================================
-// NPCEA USSD Demo — Africa's Talking endpoint
+// NPCEA USSD Demo - Africa's Talking endpoint
 // All data is hardcoded for demonstration. No database.
 // ============================================================
 header('Content-Type: text/plain');
@@ -10,7 +10,7 @@ $sessionId   = $_POST['sessionId']   ?? '';
 $phoneNumber = $_POST['phoneNumber'] ?? '';
 $text        = $_POST['text']        ?? '';
 
-// Normalise the phone: +254712345678 -> 254712345678
+// Normalise the phone: +254745361106 -> 254745361106
 $phone = preg_replace('/\D/', '', $phoneNumber);
 
 // Split accumulated input on '*'
@@ -18,33 +18,36 @@ $input = $text === '' ? [] : explode('*', $text);
 
 // ============================================================
 // HARDCODED OFFICER "DATABASE"
-// Keyed by phone number so we can look up who is dialing.
+// Keyed by service number. The phone must match the one on file.
 // ============================================================
 $officers = [
-    '254712345678' => [
-        'service_number' => '67181',
-        'rank'           => 'Sergeant',
-        'name'           => 'John Mwangi Kamau',
+    '267181' => [
+        'service_number' => '267181',
+        'rank'           => 'Constable',
+        'name'           => 'Isaac Gitau',
+        'phone'          => '254745361106',
         'faculty'        => 'Alpha Faculty',
         'department'     => 'Traffic',
         'leave_balance'  => 22,
         'parade_today'   => 'Present',
         'parade_remarks' => 'Marked by Cmdr. Otieno at 06:12',
     ],
-    '254798765432' => [
-        'service_number' => '67182',
+    '267182' => [
+        'service_number' => '267182',
         'rank'           => 'Corporal',
         'name'           => 'Mary Njeri Wanjiku',
+        'phone'          => '254798765432',
         'faculty'        => 'Bravo Faculty',
         'department'     => 'Communications',
         'leave_balance'  => 18,
         'parade_today'   => 'Sick',
         'parade_remarks' => 'Medical certificate pending',
     ],
-    '254701111111' => [
-        'service_number' => '67183',
+    '267183' => [
+        'service_number' => '267183',
         'rank'           => 'Inspector',
         'name'           => 'Peter Ochieng Odhiambo',
+        'phone'          => '254701111111',
         'faculty'        => 'Alpha Faculty',
         'department'     => 'Investigations',
         'leave_balance'  => 30,
@@ -53,23 +56,54 @@ $officers = [
     ],
 ];
 
-// Look up the officer
-$officer = $officers[$phone] ?? null;
-
-// Short display name
-$display_name = $officer ? ($officer['rank'] . ' ' . explode(' ', $officer['name'])[0]) : 'Officer';
-
 // ============================================================
 // MENU STATE MACHINE
 // ============================================================
 
-// Level 0: first dial — main menu
+// ---------- LEVEL 0: first dial ----------
 if ($text === '') {
-    if (!$officer) {
-        echo "END Your number is not registered.\n"
-           . "Contact HQ on 020-XXX-XXXX to enroll.";
+    $response  = "CON Welcome to NPCEA\n";
+    $response .= "Faculty Records System\n";
+    $response .= "----------------\n";
+    $response .= "Enter your Service Number:";
+    echo $response;
+    exit;
+}
+
+// ---------- LEVEL 1: user typed a service number ----------
+if (count($input) === 1) {
+    $svc = trim($input[0]);
+
+    // Validate format
+    if (!preg_match('/^\d{4,10}$/', $svc)) {
+        $response  = "CON Invalid service number.\n";
+        $response .= "Enter digits only (e.g. 267181):";
+        echo $response;
         exit;
     }
+
+    // Look up by service number
+    $officer = $officers[$svc] ?? null;
+
+    if (!$officer) {
+        $response  = "END Service number not found.\n";
+        $response .= "Contact HQ on 020-XXX-XXXX.";
+        echo $response;
+        exit;
+    }
+
+    // Check the phone matches the one on record
+    if ($officer['phone'] !== $phone) {
+        $response  = "END Access denied.\n";
+        $response .= "This service number is not\n";
+        $response .= "linked to the number you dialed.\n";
+        $response .= "Contact HQ to update your record.";
+        echo $response;
+        exit;
+    }
+
+    // Success - show the main menu
+    $display_name = $officer['rank'] . ' ' . explode(' ', $officer['name'])[0];
 
     $response  = "CON Welcome, {$display_name}\n";
     $response .= "Svc No: {$officer['service_number']}\n";
@@ -84,32 +118,41 @@ if ($text === '') {
     exit;
 }
 
-// If we got this far, the officer must exist
-if (!$officer) {
-    echo "END Your number is not registered.";
+// ---------- LEVELS 2+: logged in, show menu actions ----------
+// At this point $input[0] is the service number. Everything after is menu action.
+
+$svc = trim($input[0]);
+$officer = $officers[$svc] ?? null;
+
+// Guard: if we lost the officer (shouldn't happen mid-session)
+if (!$officer || $officer['phone'] !== $phone) {
+    echo "END Session expired. Dial again.";
     exit;
 }
 
-// ============================================================
-// LEVEL 1 — first selection
-// ============================================================
-if (count($input) === 1) {
+// Strip the service number to get the actual menu action path
+$action = array_slice($input, 1);
 
-    switch ($input[0]) {
+// If the user hasn't picked an action yet (shouldn't happen, safety)
+if (empty($action)) {
+    echo "END Session error. Dial again.";
+    exit;
+}
 
-        // ---------- 1. Parade status ----------
+// ---------- ACTION LEVEL 1 ----------
+if (count($action) === 1) {
+
+    switch ($action[0]) {
+
         case '1':
-            $status = $officer['parade_today'];
-
             $response  = "END Parade status - today\n";
             $response .= "----------------\n";
-            $response .= "Status: {$status}\n";
+            $response .= "Status: {$officer['parade_today']}\n";
             $response .= "----------------\n";
             $response .= "{$officer['parade_remarks']}";
             echo $response;
             exit;
 
-        // ---------- 2. Leave balance ----------
         case '2':
             $response  = "END Leave balance\n";
             $response .= "----------------\n";
@@ -119,7 +162,6 @@ if (count($input) === 1) {
             echo $response;
             exit;
 
-        // ---------- 3. Apply for leave (sub-menu) ----------
         case '3':
             $response  = "CON Apply for leave\n";
             $response .= "Select type:\n";
@@ -131,7 +173,6 @@ if (count($input) === 1) {
             echo $response;
             exit;
 
-        // ---------- 4. Report sick ----------
         case '4':
             $response  = "CON Report sick\n";
             $response .= "This will:\n";
@@ -143,7 +184,6 @@ if (count($input) === 1) {
             echo $response;
             exit;
 
-        // ---------- 5. Posting details ----------
         case '5':
             $response  = "END My posting details\n";
             $response .= "----------------\n";
@@ -165,13 +205,11 @@ if (count($input) === 1) {
     }
 }
 
-// ============================================================
-// LEVEL 2 — leave sub-menu and confirmations
-// ============================================================
-if (count($input) === 2) {
+// ---------- ACTION LEVEL 2 ----------
+if (count($action) === 2) {
 
-    // ----- Apply for leave: type selected -----
-    if ($input[0] === '3') {
+    // Leave sub-menu
+    if ($action[0] === '3') {
         $types = [
             '1' => 'Annual',
             '2' => 'Sick',
@@ -179,26 +217,26 @@ if (count($input) === 2) {
             '4' => 'Compassionate',
         ];
 
-        if ($input[1] === '0') {
+        if ($action[1] === '0') {
             echo "END Leave request cancelled.";
             exit;
         }
 
-        if (!isset($types[$input[1]])) {
+        if (!isset($types[$action[1]])) {
             echo "END Invalid leave type.";
             exit;
         }
 
-        $response  = "CON {$types[$input[1]]} leave\n";
+        $response  = "CON {$types[$action[1]]} leave\n";
         $response .= "Enter start date (YYYYMMDD):\n";
         $response .= "Example: 20261001";
         echo $response;
         exit;
     }
 
-    // ----- Report sick: confirmation -----
-    if ($input[0] === '4') {
-        if ($input[1] === '1') {
+    // Report sick confirmation
+    if ($action[0] === '4') {
+        if ($action[1] === '1') {
             $response  = "END Sick reported\n";
             $response .= "----------------\n";
             $response .= "Your commander has been notified.\n";
@@ -212,11 +250,9 @@ if (count($input) === 2) {
     }
 }
 
-// ============================================================
-// LEVEL 3 — leave application flow
-// ============================================================
-if (count($input) === 3 && $input[0] === '3') {
-    $start = $input[2];
+// ---------- ACTION LEVEL 3: leave start date entered ----------
+if (count($action) === 3 && $action[0] === '3') {
+    $start = $action[2];
 
     if (!preg_match('/^\d{8}$/', $start)) {
         $response  = "CON Invalid date format.\n";
@@ -232,12 +268,10 @@ if (count($input) === 3 && $input[0] === '3') {
     exit;
 }
 
-// ============================================================
-// LEVEL 4 — leave confirmation
-// ============================================================
-if (count($input) === 4 && $input[0] === '3') {
-    $start = $input[2];
-    $end   = $input[3];
+// ---------- ACTION LEVEL 4: leave end date entered ----------
+if (count($action) === 4 && $action[0] === '3') {
+    $start = $action[2];
+    $end   = $action[3];
 
     if (!preg_match('/^\d{8}$/', $end)) {
         $response  = "CON Invalid end date.\n";
@@ -253,7 +287,6 @@ if (count($input) === 4 && $input[0] === '3') {
         exit;
     }
 
-    // Calculate days
     $start_ts = strtotime($start);
     $end_ts   = strtotime($end);
     $days     = (int) (($end_ts - $start_ts) / 86400) + 1;
@@ -262,7 +295,7 @@ if (count($input) === 4 && $input[0] === '3') {
     $end_fmt   = date('d M Y', $end_ts);
 
     $types = ['1' => 'Annual', '2' => 'Sick', '3' => 'Study', '4' => 'Compassionate'];
-    $type  = $types[$input[1]] ?? 'Annual';
+    $type  = $types[$action[1]] ?? 'Annual';
 
     $response  = "CON Confirm leave request:\n";
     $response .= "----------------\n";
@@ -277,13 +310,11 @@ if (count($input) === 4 && $input[0] === '3') {
     exit;
 }
 
-// ============================================================
-// LEVEL 5 — leave submitted
-// ============================================================
-if (count($input) === 5 && $input[0] === '3') {
-    if ($input[4] === '1') {
+// ---------- ACTION LEVEL 5: leave submitted ----------
+if (count($action) === 5 && $action[0] === '3') {
+    if ($action[4] === '1') {
         $types = ['1' => 'Annual', '2' => 'Sick', '3' => 'Study', '4' => 'Compassionate'];
-        $type  = $types[$input[1]] ?? 'Annual';
+        $type  = $types[$action[1]] ?? 'Annual';
 
         $response  = "END Leave request submitted\n";
         $response .= "----------------\n";
@@ -298,7 +329,5 @@ if (count($input) === 5 && $input[0] === '3') {
     }
 }
 
-// ============================================================
-// Fallback
-// ============================================================
+// ---------- Fallback ----------
 echo "END Something went wrong.\nPlease dial again.";
