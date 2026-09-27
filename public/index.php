@@ -95,8 +95,8 @@ $input = $text === '' ? [] : explode('*', $text);
 $officers = [
     '267181' => [
         'service_number' => '267181',
-        'rank'           => 'Constable',
-        'name'           => 'Isaac Gitau',
+        'rank'           => 'Dev',
+        'name'           => 'Gitau',
         'phone'          => '254745361106',
         'faculty'        => 'Criminal Investigation Faculty',
         'department'     => 'ICT Department',
