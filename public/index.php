@@ -1,30 +1,102 @@
 <?php
 // ============================================================
-// NPCEA USSD Demo - Africa's Talking endpoint
-// Fully hardcoded. No database. No sessions.
+// NPCEA USSD + SMS Demo
+// USSD: Africa's Talking endpoint. Data is hardcoded.
+// SMS: fired after certain actions. Sandbox mode.
 // ============================================================
 header('Content-Type: text/plain');
 
-// ---------- Africa's Talking request ----------
+// ============================================================
+// CONFIG
+// ============================================================
+const AT_API_KEY  = 'atsk_c906f8ced77330fe13bd3156e357ae44d38a82d03ee0852fa0db479ccb360a24aac49f1f';
+const AT_USERNAME = 'sandbox';                    // default sandbox username
+const AT_SANDBOX  = true;
+const AT_SENDER   = '';                           // blank = use default sender
+
+// SAFETY LOCK: while true, every SMS goes to TEST_OVERRIDE instead of the
+// real recipient. Prevents accidental costs during demos.
+// Flip to false ONLY after rotating the API key and whitelisting numbers.
+const DEMO_LOCK      = true;
+const TEST_OVERRIDE  = '254745361106';            // your number
+
+// ============================================================
+// SMS SENDER
+// ============================================================
+function send_sms($to, $message)
+{
+    $digits = preg_replace('/\D/', '', $to);
+    if (strlen($digits) === 10 && $digits[0] === '0') {
+        $digits = '254' . substr($digits, 1);
+    } elseif (strlen($digits) === 9) {
+        $digits = '254' . $digits;
+    }
+    $to = '+' . $digits;
+
+    $endpoint = AT_SANDBOX
+        ? 'https://api.sandbox.africastalking.com/version1/messaging'
+        : 'https://api.africastalking.com/version1/messaging';
+
+    $payload = [
+        'username' => AT_USERNAME,
+        'to'       => $to,
+        'message'  => $message,
+    ];
+    if (AT_SENDER !== '') {
+        $payload['from'] = AT_SENDER;
+    }
+
+    $ch = curl_init($endpoint);
+    curl_setopt_array($ch, [
+        CURLOPT_POST           => true,
+        CURLOPT_POSTFIELDS     => http_build_query($payload),
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT        => 5,
+        CURLOPT_CONNECTTIMEOUT => 3,
+        CURLOPT_HTTPHEADER     => [
+            'apiKey: ' . AT_API_KEY,
+            'Accept: application/json',
+            'Content-Type: application/x-www-form-urlencoded',
+        ],
+    ]);
+
+    $response = curl_exec($ch);
+    $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $curlErr  = curl_error($ch);
+    curl_close($ch);
+
+    error_log(sprintf(
+        '[SMS] to=%s http=%d err=%s resp=%s',
+        $to, $httpCode, $curlErr, substr((string) $response, 0, 300)
+    ));
+
+    return $httpCode === 200 || $httpCode === 201;
+}
+
+// Route SMS through TEST_OVERRIDE when the demo lock is on
+function sms_recipient($phone)
+{
+    return DEMO_LOCK ? TEST_OVERRIDE : $phone;
+}
+
+// ============================================================
+// AFRICA'S TALKING REQUEST
+// ============================================================
 $sessionId   = $_POST['sessionId']   ?? '';
 $phoneNumber = $_POST['phoneNumber'] ?? '';
 $text        = $_POST['text']        ?? '';
 
-// Normalise the phone: +254745361106 -> 254745361106
 $phone = preg_replace('/\D/', '', $phoneNumber);
-
-// Split accumulated input on '*'
 $input = $text === '' ? [] : explode('*', $text);
 
 // ============================================================
 // HARDCODED OFFICER "DATABASE"
-// Keyed by service number. The phone must match the one on file.
 // ============================================================
 $officers = [
     '267181' => [
         'service_number' => '267181',
-        'rank'           => 'DEV',
-        'name'           => 'Gitau',
+        'rank'           => 'Constable',
+        'name'           => 'Isaac Gitau',
         'phone'          => '254745361106',
         'faculty'        => 'Criminal Investigation Faculty',
         'department'     => 'ICT Department',
@@ -33,15 +105,15 @@ $officers = [
         'parade_remarks' => 'Marked by IP Kenneth Njari',
 
         'leave_requests' => [
-            ['type' => 'Annual',  'from' => '12 Aug 2026', 'to' => '16 Aug 2026', 'days' => 5, 'status' => 'Approved'],
-            ['type' => 'Sick',    'from' => '03 Jul 2026', 'to' => '04 Jul 2026', 'days' => 2, 'status' => 'Approved'],
-            ['type' => 'Annual',  'from' => '01 Oct 2026', 'to' => '05 Oct 2026', 'days' => 5, 'status' => 'Pending'],
+            ['type' => 'Annual', 'from' => '12 Aug 2026', 'to' => '16 Aug 2026', 'days' => 5, 'status' => 'Approved'],
+            ['type' => 'Sick',   'from' => '03 Jul 2026', 'to' => '04 Jul 2026', 'days' => 2, 'status' => 'Approved'],
+            ['type' => 'Annual', 'from' => '01 Oct 2026', 'to' => '05 Oct 2026', 'days' => 5, 'status' => 'Pending'],
         ],
 
         'notifications' => [
-            ['title' => 'Leave approved',    'body' => '12-16 Aug annual leave approved.',  'when' => '10 Aug'],
-            ['title' => 'Parade marked',     'body' => 'Marked Present on 25 Sep by Cmdr.', 'when' => 'Yesterday'],
-            ['title' => 'Password changed',  'body' => 'Your password was updated.',        'when' => '2 days ago'],
+            ['title' => 'Leave approved',   'body' => '12-16 Aug annual leave approved.',  'when' => '10 Aug'],
+            ['title' => 'Parade marked',    'body' => 'Marked Present on 25 Sep by Cmdr.', 'when' => 'Yesterday'],
+            ['title' => 'Password changed', 'body' => 'Your password was updated.',        'when' => '2 days ago'],
         ],
     ],
 
@@ -57,13 +129,13 @@ $officers = [
         'parade_remarks' => 'Medical certificate pending',
 
         'leave_requests' => [
-            ['type' => 'Sick',    'from' => '26 Sep 2026', 'to' => '27 Sep 2026', 'days' => 2, 'status' => 'Pending'],
-            ['type' => 'Annual',  'from' => '05 Jun 2026', 'to' => '09 Jun 2026', 'days' => 5, 'status' => 'Approved'],
+            ['type' => 'Sick',   'from' => '26 Sep 2026', 'to' => '27 Sep 2026', 'days' => 2, 'status' => 'Pending'],
+            ['type' => 'Annual', 'from' => '05 Jun 2026', 'to' => '09 Jun 2026', 'days' => 5, 'status' => 'Approved'],
         ],
 
         'notifications' => [
-            ['title' => 'Sick leave logged', 'body' => 'Marked Sick today.',           'when' => 'Today'],
-            ['title' => 'Welcome',           'body' => 'Welcome to the USSD portal.',  'when' => '3 days ago'],
+            ['title' => 'Sick leave logged', 'body' => 'Marked Sick today.',          'when' => 'Today'],
+            ['title' => 'Welcome',           'body' => 'Welcome to the USSD portal.', 'when' => '3 days ago'],
         ],
     ],
 
@@ -83,12 +155,11 @@ $officers = [
         ],
 
         'notifications' => [
-            ['title' => 'Attachment notice', 'body' => 'Attached to HQ Nairobi.',    'when' => '2 days ago'],
+            ['title' => 'Attachment notice', 'body' => 'Attached to HQ Nairobi.', 'when' => '2 days ago'],
         ],
     ],
 ];
 
-// ---------- Incident catalogue ----------
 $incident_types = [
     '1' => 'Traffic accident',
     '2' => 'Theft',
@@ -97,9 +168,10 @@ $incident_types = [
     '5' => 'Other',
 ];
 
-// ---------- Supervisor ranks that get extra menu items ----------
-$supervisor_ranks = ['Inspector', 'Chief Inspector', 'Assistant Superintendent',
-                     'Superintendent', 'Senior Superintendent', 'Commissioner of Police'];
+$supervisor_ranks = [
+    'Inspector', 'Chief Inspector', 'Assistant Superintendent',
+    'Superintendent', 'Senior Superintendent', 'Commissioner of Police',
+];
 
 // ============================================================
 // MENU STATE MACHINE
@@ -107,47 +179,46 @@ $supervisor_ranks = ['Inspector', 'Chief Inspector', 'Assistant Superintendent',
 
 // ---------- LEVEL 0: first dial ----------
 if ($text === '') {
-    $response  = "CON Welcome to NPCEA\n";
-    $response .= "Faculty Records System\n";
-    $response .= "----------------\n";
-    $response .= "Enter your Service Number:";
-    echo $response;
+    echo "CON Welcome to NPCEA\n";
+    echo "Faculty Records System\n";
+    echo "----------------\n";
+    echo "Enter your Service Number:";
     exit;
 }
 
-// ---------- LEVEL 1: user typed a service number ----------
+// ---------- LEVEL 1: user typed service number ----------
 if (count($input) === 1) {
     $svc = trim($input[0]);
 
     if (!preg_match('/^\d{4,10}$/', $svc)) {
-        $response  = "CON Invalid service number.\n";
-        $response .= "Enter digits only (e.g. 267181):";
-        echo $response;
+        echo "CON Invalid service number.\n";
+        echo "Enter digits only (e.g. 267181):";
         exit;
     }
 
     $officer = $officers[$svc] ?? null;
 
     if (!$officer) {
-        $response  = "END Service number not found.\n";
-        $response .= "Contact HQ on 020-XXX-XXXX.";
-        echo $response;
+        echo "END Service number not found.\n";
+        echo "Contact HQ on 020-XXX-XXXX.";
         exit;
     }
 
     if ($officer['phone'] !== $phone) {
-        $response  = "END Access denied.\n";
-        $response .= "This service number is not\n";
-        $response .= "linked to the number you dialed.\n";
-        $response .= "Contact HQ to update your record.";
-        echo $response;
+        send_sms(
+            sms_recipient($officer['phone']),
+            "NPCEA SECURITY: Someone dialed USSD using service number {$officer['service_number']} from a different phone. If this wasn't you, contact HQ immediately."
+        );
+
+        echo "END Access denied.\n";
+        echo "This service number is not\n";
+        echo "linked to the number you dialed.\n";
+        echo "Contact HQ to update your record.";
         exit;
     }
 
-    // Success — main menu
     $first_name = explode(' ', $officer['name'])[0];
     $display_name = $officer['rank'] . ' ' . $first_name;
-
     $new_notifs = count($officer['notifications'] ?? []);
 
     $response  = "CON Welcome, {$display_name}\n";
@@ -162,7 +233,6 @@ if (count($input) === 1) {
     $response .= "7. Notifications ({$new_notifs} new)\n";
     $response .= "8. Report an incident\n";
 
-    // Extra items for supervisors
     if (in_array($officer['rank'], $supervisor_ranks, true)) {
         $response .= "9. Mark parade\n";
         $response .= "10. Look up officer\n";
@@ -173,8 +243,8 @@ if (count($input) === 1) {
     exit;
 }
 
-// ---------- LEVELS 2+: logged in ----------
-$svc = trim($input[0]);
+// ---------- LEVELS 2+ ----------
+$svc     = trim($input[0]);
 $officer = $officers[$svc] ?? null;
 
 if (!$officer || $officer['phone'] !== $phone) {
@@ -182,71 +252,65 @@ if (!$officer || $officer['phone'] !== $phone) {
     exit;
 }
 
-$action = array_slice($input, 1);
+$action        = array_slice($input, 1);
+$is_supervisor = in_array($officer['rank'], $supervisor_ranks, true);
 
 if (empty($action)) {
     echo "END Session error. Dial again.";
     exit;
 }
 
-$is_supervisor = in_array($officer['rank'], $supervisor_ranks, true);
-
 // ============================================================
-// ACTION LEVEL 1 — main menu selections
+// ACTION LEVEL 1
 // ============================================================
 if (count($action) === 1) {
 
     switch ($action[0]) {
 
         case '1':
-            $response  = "END Parade status - today\n";
-            $response .= "----------------\n";
-            $response .= "Status: {$officer['parade_today']}\n";
-            $response .= "----------------\n";
-            $response .= "{$officer['parade_remarks']}";
-            echo $response;
+            echo "END Parade status - today\n";
+            echo "----------------\n";
+            echo "Status: {$officer['parade_today']}\n";
+            echo "----------------\n";
+            echo "{$officer['parade_remarks']}";
             exit;
 
         case '2':
-            $response  = "END Leave balance\n";
-            $response .= "----------------\n";
-            $response .= "Remaining: {$officer['leave_balance']} days\n";
-            $response .= "Entitlement: 30 days\n";
-            $response .= "Used this year: " . (30 - $officer['leave_balance']) . " days";
-            echo $response;
+            echo "END Leave balance\n";
+            echo "----------------\n";
+            echo "Remaining: {$officer['leave_balance']} days\n";
+            echo "Entitlement: 30 days\n";
+            echo "Used this year: " . (30 - $officer['leave_balance']) . " days";
             exit;
 
         case '3':
-            $response  = "CON Apply for leave\n";
-            $response .= "Select type:\n";
-            $response .= "1. Annual\n";
-            $response .= "2. Sick\n";
-            $response .= "3. Study\n";
-            $response .= "4. Compassionate\n";
-            $response .= "0. Back";
-            echo $response;
+            echo "CON Apply for leave\n";
+            echo "Select type:\n";
+            echo "1. Annual\n";
+            echo "2. Sick\n";
+            echo "3. Study\n";
+            echo "4. Compassionate\n";
+            echo "0. Back";
             exit;
 
         case '4':
-            $response  = "CON Report sick\n";
-            $response .= "This will:\n";
-            $response .= "- Mark you Sick today\n";
-            $response .= "- Notify your commander\n";
-            $response .= "----------------\n";
-            $response .= "1. Confirm\n";
-            $response .= "2. Cancel";
-            echo $response;
+            echo "CON Report sick\n";
+            echo "This will:\n";
+            echo "- Mark you Sick today\n";
+            echo "- Notify your commander\n";
+            echo "----------------\n";
+            echo "1. Confirm\n";
+            echo "2. Cancel";
             exit;
 
         case '5':
-            $response  = "END My posting details\n";
-            $response .= "----------------\n";
-            $response .= "Rank: {$officer['rank']}\n";
-            $response .= "Name: {$officer['name']}\n";
-            $response .= "Svc No: {$officer['service_number']}\n";
-            $response .= "Faculty: {$officer['faculty']}\n";
-            $response .= "Dept: {$officer['department']}";
-            echo $response;
+            echo "END My posting details\n";
+            echo "----------------\n";
+            echo "Rank: {$officer['rank']}\n";
+            echo "Name: {$officer['name']}\n";
+            echo "Svc No: {$officer['service_number']}\n";
+            echo "Faculty: {$officer['faculty']}\n";
+            echo "Dept: {$officer['department']}";
             exit;
 
         case '6':
@@ -255,18 +319,15 @@ if (count($action) === 1) {
                 echo "END You have no leave requests.";
                 exit;
             }
-
             $response  = "END My leave requests\n";
             $response .= "----------------\n";
-            // Show most recent first, max 3
             $recent = array_slice(array_reverse($requests), 0, 3);
             foreach ($recent as $i => $r) {
                 $response .= ($i + 1) . ". {$r['type']} ({$r['days']}d)\n";
                 $response .= "   {$r['from']} - {$r['to']}\n";
                 $response .= "   Status: {$r['status']}\n";
             }
-            $response = rtrim($response, "\n");
-            echo $response;
+            echo rtrim($response, "\n");
             exit;
 
         case '7':
@@ -275,7 +336,6 @@ if (count($action) === 1) {
                 echo "END You have no notifications.";
                 exit;
             }
-
             $response  = "END Notifications\n";
             $response .= "----------------\n";
             $recent = array_slice(array_reverse($notifs), 0, 3);
@@ -284,20 +344,18 @@ if (count($action) === 1) {
                 $response .= "   {$n['body']}\n";
                 $response .= "   {$n['when']}\n";
             }
-            $response = rtrim($response, "\n");
-            echo $response;
+            echo rtrim($response, "\n");
             exit;
 
         case '8':
-            $response  = "CON Report an incident\n";
-            $response .= "Select category:\n";
-            $response .= "1. Traffic accident\n";
-            $response .= "2. Theft\n";
-            $response .= "3. Assault\n";
-            $response .= "4. Suspicious activity\n";
-            $response .= "5. Other\n";
-            $response .= "0. Back";
-            echo $response;
+            echo "CON Report an incident\n";
+            echo "Select category:\n";
+            echo "1. Traffic accident\n";
+            echo "2. Theft\n";
+            echo "3. Assault\n";
+            echo "4. Suspicious activity\n";
+            echo "5. Other\n";
+            echo "0. Back";
             exit;
 
         case '9':
@@ -305,12 +363,11 @@ if (count($action) === 1) {
                 echo "END Access denied.\nSupervisors only.";
                 exit;
             }
-            $response  = "CON Mark parade\n";
-            $response .= "Who is this for?\n";
-            $response .= "1. Myself\n";
-            $response .= "2. By service number\n";
-            $response .= "0. Back";
-            echo $response;
+            echo "CON Mark parade\n";
+            echo "Who is this for?\n";
+            echo "1. Myself\n";
+            echo "2. By service number\n";
+            echo "0. Back";
             exit;
 
         case '10':
@@ -318,9 +375,8 @@ if (count($action) === 1) {
                 echo "END Access denied.\nSupervisors only.";
                 exit;
             }
-            $response  = "CON Look up officer\n";
-            $response .= "Enter service number:";
-            echo $response;
+            echo "CON Look up officer\n";
+            echo "Enter service number:";
             exit;
 
         case '0':
@@ -334,11 +390,10 @@ if (count($action) === 1) {
 }
 
 // ============================================================
-// ACTION LEVEL 2 — sub-menu selections
+// ACTION LEVEL 2
 // ============================================================
 if (count($action) === 2) {
 
-    // ---------- Leave flow: type selected ----------
     if ($action[0] === '3') {
         $types = ['1' => 'Annual', '2' => 'Sick', '3' => 'Study', '4' => 'Compassionate'];
 
@@ -351,28 +406,32 @@ if (count($action) === 2) {
             exit;
         }
 
-        $response  = "CON {$types[$action[1]]} leave\n";
-        $response .= "Enter start date (YYYYMMDD):\n";
-        $response .= "Example: 20261001";
-        echo $response;
+        echo "CON {$types[$action[1]]} leave\n";
+        echo "Enter start date (YYYYMMDD):\n";
+        echo "Example: 20261001";
         exit;
     }
 
-    // ---------- Sick confirmation ----------
     if ($action[0] === '4') {
         if ($action[1] === '1') {
-            $response  = "END Sick reported\n";
-            $response .= "----------------\n";
-            $response .= "Your commander has been notified.\n";
-            $response .= "Ref: SICK-2026-0042";
-            echo $response;
+            $officer_sms = "NPCEA: Sick reported. Your commander has been notified. Ref SICK-2026-0042.";
+
+            $commander_phone = '254700000000';
+            $commander_sms = "NPCEA: {$officer['rank']} {$officer['name']} ({$officer['service_number']}) reported Sick today. Faculty: {$officer['faculty']}.";
+
+            send_sms(sms_recipient($officer['phone']), $officer_sms);
+            send_sms(sms_recipient($commander_phone), $commander_sms);
+
+            echo "END Sick reported\n";
+            echo "----------------\n";
+            echo "Your commander has been notified.\n";
+            echo "Ref: SICK-2026-0042";
             exit;
         }
         echo "END Sick report cancelled.";
         exit;
     }
 
-    // ---------- Incident flow: category selected ----------
     if ($action[0] === '8') {
         if ($action[1] === '0') {
             echo "END Incident report cancelled.";
@@ -382,34 +441,28 @@ if (count($action) === 2) {
             echo "END Invalid category.";
             exit;
         }
-
-        $response  = "CON {$incident_types[$action[1]]}\n";
-        $response .= "Enter brief description\n";
-        $response .= "(max 100 chars):";
-        echo $response;
+        echo "CON {$incident_types[$action[1]]}\n";
+        echo "Enter brief description\n";
+        echo "(max 100 chars):";
         exit;
     }
 
-    // ---------- Mark parade: who? ----------
     if ($action[0] === '9' && $is_supervisor) {
         if ($action[1] === '0') {
             echo "END Cancelled.";
             exit;
         }
         if ($action[1] === '1') {
-            // Marking self
-            $response  = "CON Mark yourself as:\n";
-            $response .= "1. Present\n";
-            $response .= "2. Absent\n";
-            $response .= "3. Sick\n";
-            $response .= "0. Back";
-            echo $response;
+            echo "CON Mark yourself as:\n";
+            echo "1. Present\n";
+            echo "2. Absent\n";
+            echo "3. Sick\n";
+            echo "0. Back";
             exit;
         }
         if ($action[1] === '2') {
-            $response  = "CON Enter service number\n";
-            $response .= "to mark:";
-            echo $response;
+            echo "CON Enter service number\n";
+            echo "to mark:";
             exit;
         }
         echo "END Invalid option.";
@@ -422,45 +475,41 @@ if (count($action) === 2) {
 // ============================================================
 if (count($action) === 3) {
 
-    // ---------- Leave: start date entered ----------
     if ($action[0] === '3') {
         $start = $action[2];
         if (!preg_match('/^\d{8}$/', $start)) {
-            $response  = "CON Invalid date format.\n";
-            $response .= "Enter start date (YYYYMMDD):\n";
-            $response .= "Example: 20261001";
-            echo $response;
+            echo "CON Invalid date format.\n";
+            echo "Enter start date (YYYYMMDD):\n";
+            echo "Example: 20261001";
             exit;
         }
-
-        $response  = "CON Enter end date (YYYYMMDD):\n";
-        $response .= "Example: 20261005";
-        echo $response;
+        echo "CON Enter end date (YYYYMMDD):\n";
+        echo "Example: 20261005";
         exit;
     }
 
-    // ---------- Mark parade self: status picked ----------
     if ($action[0] === '9' && $action[1] === '1' && $is_supervisor) {
         if ($action[2] === '0') {
             echo "END Cancelled.";
             exit;
         }
-
         $statuses = ['1' => 'Present', '2' => 'Absent', '3' => 'Sick'];
         if (!isset($statuses[$action[2]])) {
             echo "END Invalid status.";
             exit;
         }
 
-        $response  = "END Parade marked\n";
-        $response .= "----------------\n";
-        $response .= "You are now: {$statuses[$action[2]]}\n";
-        $response .= "Ref: PRD-2026-0091";
-        echo $response;
+        $new_status = $statuses[$action[2]];
+        $sms = "NPCEA: You have been marked {$new_status} for today's parade. Ref PRD-2026-0091.";
+        send_sms(sms_recipient($officer['phone']), $sms);
+
+        echo "END Parade marked\n";
+        echo "----------------\n";
+        echo "You are now: {$new_status}\n";
+        echo "Ref: PRD-2026-0091";
         exit;
     }
 
-    // ---------- Look up officer: service number entered ----------
     if ($action[0] === '10' && $is_supervisor) {
         $target_svc = trim($action[1]);
         $target = $officers[$target_svc] ?? null;
@@ -470,14 +519,13 @@ if (count($action) === 3) {
             exit;
         }
 
-        $response  = "END Officer status\n";
-        $response .= "----------------\n";
-        $response .= "Rank: {$target['rank']}\n";
-        $response .= "Name: {$target['name']}\n";
-        $response .= "Svc No: {$target['service_number']}\n";
-        $response .= "Faculty: {$target['faculty']}\n";
-        $response .= "Today: {$target['parade_today']}";
-        echo $response;
+        echo "END Officer status\n";
+        echo "----------------\n";
+        echo "Rank: {$target['rank']}\n";
+        echo "Name: {$target['name']}\n";
+        echo "Svc No: {$target['service_number']}\n";
+        echo "Faculty: {$target['faculty']}\n";
+        echo "Today: {$target['parade_today']}";
         exit;
     }
 }
@@ -487,22 +535,18 @@ if (count($action) === 3) {
 // ============================================================
 if (count($action) === 4) {
 
-    // ---------- Leave: end date entered — confirmation ----------
     if ($action[0] === '3') {
         $start = $action[2];
         $end   = $action[3];
 
         if (!preg_match('/^\d{8}$/', $end)) {
-            $response  = "CON Invalid end date.\n";
-            $response .= "Enter end date (YYYYMMDD):";
-            echo $response;
+            echo "CON Invalid end date.\n";
+            echo "Enter end date (YYYYMMDD):";
             exit;
         }
-
         if ($end < $start) {
-            $response  = "CON End date must be after start date.\n";
-            $response .= "Enter end date (YYYYMMDD):";
-            echo $response;
+            echo "CON End date must be after start date.\n";
+            echo "Enter end date (YYYYMMDD):";
             exit;
         }
 
@@ -516,43 +560,38 @@ if (count($action) === 4) {
         $types = ['1' => 'Annual', '2' => 'Sick', '3' => 'Study', '4' => 'Compassionate'];
         $type  = $types[$action[1]] ?? 'Annual';
 
-        $response  = "CON Confirm leave request:\n";
-        $response .= "----------------\n";
-        $response .= "Type: {$type}\n";
-        $response .= "From: {$start_fmt}\n";
-        $response .= "To: {$end_fmt}\n";
-        $response .= "Days: {$days}\n";
-        $response .= "----------------\n";
-        $response .= "1. Submit\n";
-        $response .= "2. Cancel";
-        echo $response;
+        echo "CON Confirm leave request:\n";
+        echo "----------------\n";
+        echo "Type: {$type}\n";
+        echo "From: {$start_fmt}\n";
+        echo "To: {$end_fmt}\n";
+        echo "Days: {$days}\n";
+        echo "----------------\n";
+        echo "1. Submit\n";
+        echo "2. Cancel";
         exit;
     }
 
-    // ---------- Incident: description entered — confirm ----------
     if ($action[0] === '8') {
         $category = $incident_types[$action[1]] ?? 'Other';
         $desc     = trim($action[3]);
 
         if (strlen($desc) < 5) {
-            $response  = "CON Description too short.\n";
-            $response .= "Enter brief description:";
-            echo $response;
+            echo "CON Description too short.\n";
+            echo "Enter brief description:";
             exit;
         }
 
-        $response  = "CON Confirm incident:\n";
-        $response .= "----------------\n";
-        $response .= "Type: {$category}\n";
-        $response .= "Desc: {$desc}\n";
-        $response .= "----------------\n";
-        $response .= "1. Submit\n";
-        $response .= "2. Cancel";
-        echo $response;
+        echo "CON Confirm incident:\n";
+        echo "----------------\n";
+        echo "Type: {$category}\n";
+        echo "Desc: {$desc}\n";
+        echo "----------------\n";
+        echo "1. Submit\n";
+        echo "2. Cancel";
         exit;
     }
 
-    // ---------- Mark parade: officer picked, status picked ----------
     if ($action[0] === '9' && $action[1] === '2' && $is_supervisor) {
         $target_svc = trim($action[2]);
         $status_key = $action[3];
@@ -569,50 +608,72 @@ if (count($action) === 4) {
             exit;
         }
 
-        $response  = "END Parade marked\n";
-        $response .= "----------------\n";
-        $response .= "Officer: {$target['name']}\n";
-        $response .= "Status: {$statuses[$status_key]}\n";
-        $response .= "Ref: PRD-2026-0092";
-        echo $response;
+        $new_status = $statuses[$status_key];
+        $sms = "NPCEA: You have been marked {$new_status} for today's parade by {$officer['rank']} {$officer['name']}. Ref PRD-2026-0092.";
+        send_sms(sms_recipient($target['phone']), $sms);
+
+        echo "END Parade marked\n";
+        echo "----------------\n";
+        echo "Officer: {$target['name']}\n";
+        echo "Status: {$new_status}\n";
+        echo "Ref: PRD-2026-0092";
         exit;
     }
 }
 
 // ============================================================
-// ACTION LEVEL 5 — leave submitted / incident submitted
+// ACTION LEVEL 5 — final submissions (fire SMS here)
 // ============================================================
 if (count($action) === 5) {
 
-    // ---------- Leave submission ----------
     if ($action[0] === '3') {
         if ($action[4] === '1') {
             $types = ['1' => 'Annual', '2' => 'Sick', '3' => 'Study', '4' => 'Compassionate'];
             $type  = $types[$action[1]] ?? 'Annual';
 
-            $response  = "END Leave request submitted\n";
-            $response .= "----------------\n";
-            $response .= "Type: {$type}\n";
-            $response .= "Your commander will review shortly.\n";
-            $response .= "Ref: LV-2026-0043";
-            echo $response;
+            $start = $action[2];
+            $end   = $action[3];
+            $start_ts = strtotime($start);
+            $end_ts   = strtotime($end);
+            $days     = (int) (($end_ts - $start_ts) / 86400) + 1;
+            $start_fmt = date('d M Y', $start_ts);
+            $end_fmt   = date('d M Y', $end_ts);
+
+            $officer_sms = "NPCEA: {$type} leave request submitted. From {$start_fmt} to {$end_fmt} ({$days} days). Ref LV-2026-0043. Awaiting commander approval.";
+            send_sms(sms_recipient($officer['phone']), $officer_sms);
+
+            $commander_phone = '254700000000';
+            $commander_sms = "NPCEA: New {$type} leave request from {$officer['rank']} {$officer['name']} ({$officer['service_number']}). {$start_fmt} to {$end_fmt} ({$days} days). Ref LV-2026-0043. Review in portal.";
+            send_sms(sms_recipient($commander_phone), $commander_sms);
+
+            echo "END Leave request submitted\n";
+            echo "----------------\n";
+            echo "Type: {$type}\n";
+            echo "Your commander will review shortly.\n";
+            echo "Ref: LV-2026-0043";
             exit;
         }
         echo "END Leave request cancelled.";
         exit;
     }
 
-    // ---------- Incident submission ----------
     if ($action[0] === '8') {
         if ($action[4] === '1') {
             $category = $incident_types[$action[1]] ?? 'Other';
+            $desc     = trim($action[3]);
 
-            $response  = "END Incident reported\n";
-            $response .= "----------------\n";
-            $response .= "Type: {$category}\n";
-            $response .= "HQ will contact you shortly.\n";
-            $response .= "Ref: INC-2026-0137";
-            echo $response;
+            $officer_sms = "NPCEA: Incident reported ({$category}). Ref INC-2026-0137. HQ will contact you shortly.";
+            send_sms(sms_recipient($officer['phone']), $officer_sms);
+
+            $hq_phone = '254711000000';
+            $hq_sms = "NPCEA INCIDENT: {$category}. Reported by {$officer['rank']} {$officer['name']} ({$officer['service_number']}). Desc: {$desc}. Ref INC-2026-0137.";
+            send_sms(sms_recipient($hq_phone), $hq_sms);
+
+            echo "END Incident reported\n";
+            echo "----------------\n";
+            echo "Type: {$category}\n";
+            echo "HQ will contact you shortly.\n";
+            echo "Ref: INC-2026-0137";
             exit;
         }
         echo "END Incident report cancelled.";
